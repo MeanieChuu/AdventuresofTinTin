@@ -9,7 +9,7 @@ from pyDOE2 import lhs
 
 realized_tin_price = [
 	33704,
-  28308,
+  	28308,
 	23083,
 	18497,
 	17436,
@@ -18,7 +18,7 @@ realized_tin_price = [
 	
 off_mine_costs = [
 	6892,
-  6684,
+  	6684,
 	5431,
 	4536,
 	4315,
