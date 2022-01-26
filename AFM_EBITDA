@@ -1,0 +1,135 @@
+import numpy as np
+from scipy.stats import uniform, norm
+from pyDOE2 import lhs
+
+# In this iteration, I attempt to illustrate an uncertainty analysis under
+# unknown parameters to estimate off-mine operating costs and uncertain
+# realized tin price.
+# Adapted from script shared by Tristan de Boer #TinBaron
+
+realized_tin_price = [
+	33704,
+  28308,
+	23083,
+	18497,
+	17436,
+	15359,
+	]
+	
+off_mine_costs = [
+	6892,
+  6684,
+	5431,
+	4536,
+	4315,
+	4148,
+	]
+
+x = np.array(realized_tin_price)
+y = np.array(off_mine_costs)
+
+x_mean = np.mean(x)
+n = len(y)
+
+
+# LME tin price from 1.10.2021 to 21.1.2022
+# 3 price samples from each month (nov, dec, jan) in 5 day intervals.
+# I don't have any data subscriptions so these numbers were obtained from 
+# trading economics.com.
+lme_prices = np.array([
+    38890, 39293, 39918, 40351, 43497, 42555, # Jan 2022
+    39086, 38734, 39400, 37962, 38195, 39260, # Dec 2021
+    36970, 37060, 37280, 37500, 38429, 39709  # Nov 2021
+    ])
+lme_min = np.min(lme_prices)
+lme_max = np.max(lme_prices)
+
+
+# Linear regression of tin price vs off-mine costs
+# a = slope
+# b = y-intercept
+a, b = np.polyfit(x, off_mine_costs, deg=1)
+
+
+def f_regression_line(x, slope, intercept):
+    """ Given the realized tin price, estimate the corresponding off-mine 
+        operating costs.
+        
+        Inputs:
+            x: point value of the independent variable (realized tin price)
+            slope: slope coefficient obtained from simple linear regression
+            intercept: y-intercept obtained from simple linear regression
+    """
+    
+    return slope*x + intercept
+
+
+# Predict off-mine costs (dependent) given tin price (independent)
+y_hat = f_regression_line(x, slope=a, intercept=b)
+
+# Here I assume normally distributed errors.
+# Thus, to characterise the input uncertainty of our linear regression model
+# I need to obtain the standard deviations of the regression coefficients.
+ss_residuals = np.sum((y-y_hat)**2)
+var = ss_residuals / (n-2)
+ss_x = np.sum((x-x_mean)**2)
+
+# Variance of the slope coefficient
+var_slope = var/ss_x
+# Standard deviation of the slope coefficient
+sigma_slope = np.sqrt(var_slope)
+
+# Variance of the intercept coefficient
+var_intercept = var*(1/len(y) + (x_mean**2)/ss_x)
+# Standard deviation of the intercept coefficient
+sigma_intercept = np.sqrt(var_intercept)
+
+
+# Design of Experiments (DoE)
+# Each row corresponds to one set of inputs for EBITDA estimation
+design = lhs(3, samples=10)
+# I assume normally distributed regression coefficients for estimating
+# the off-mine costs in $/tonne
+design[:, 0] = norm(loc=a, scale=sigma_slope).ppf(design[:, 0])
+design[:, 1] = norm(loc=b, scale=sigma_intercept).ppf(design[:, 1])
+# I assume uniformly distributed realized tin price to reflect more uncertain
+# nature of this value. Mr Market can swing any way he wants.
+design[:, 2] = uniform(loc=lme_min, scale=lme_max-lme_min).ppf(design[:, 2])
+
+
+# Function to estimate EBITDA
+# To perform uncertainty analysis, execute this function for a sufficiently
+# large DoE. Should have enough estimates to plot a smooth histogram.
+# Then, use statistic of preference for worst, base and best case, e.g. use 
+# 95th confidence intervals for worst and best case, and mean for base case.
+def f_EBITDA(row):
+    """ Estimate EBITDA given regression parameters to determine off-mine 
+        operating costs and realized tin price.
+        
+        In principle, all variables in this function can be inputs rather than
+        pre-defined. In that case, they would have to be generated in DoE as 
+        part of the "design" variable.
+        
+        Inputs:
+            row: array of 3 values specifying the slope, intercept and 
+                 realized tin price.
+    """
+    
+    slope = row[0]
+    intercept = row[1]
+    tin_price = row[2]
+    
+    tonnes_produced = 3056
+    on_mine_operating_costs = 19.0E6
+    
+    off_mine_operating_costs = (
+        f_regression_line(tin_price, slope, intercept)
+        * tonnes_produced
+        )
+    
+    revenue = tin_price * tonnes_produced
+    
+    ebitda = revenue - on_mine_operating_costs - off_mine_operating_costs
+    ebitda_owned = 0.8414*ebitda
+    
+    return ebitda_owned
